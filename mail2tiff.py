@@ -21,6 +21,7 @@ config.read('config.ini')
 try:
 	# PyInstaller creates a temp folder and stores path in _MEIPASS
 	base_path = sys._MEIPASS
+	os.environ["PATH"] += os.pathsep + sys._MEIPASS
 except Exception:
 	base_path = os.path.abspath(".")
 
@@ -57,7 +58,7 @@ class CustomSMTPServer(smtpd.SMTPServer):
 				if part['content_type'] == 'text/plain':
 					text_message = part['content']
 			if html_message == None:
-				html_message = '<html><head></head><body><pre>' + str(text_message) + '</pre></body></html>'
+				html_message = '<html><head></head><body><pre>' + str(text_message, mailObject['encoding']) + '</pre></body></html>'
 				html_message = bytes(html_message, mailObject['encoding'])
 			if html_message[:6].lower() != bytes('<html>', 'ascii'):
 				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body>' + str(html_message, mailObject['encoding']) + '</body></html>'
@@ -68,12 +69,12 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			html_file = open(filename + '.html', 'wb')
 			html_file.write(html_message)
 			html_file.close()
-			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '8', '--image-quality', '99', '--page-size', 'Letter', filename + '.html', filename + '.pdf']
+			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '9', '--image-quality', '99', '--page-size', 'Letter', filename + '.html', filename + '.pdf']
 			process = Popen(command, stdout=DEVNULL, stderr=DEVNULL)
 			process.wait()
 			if process.returncode == 0:
 				os.remove(filename + '.html')
-				command = [base_path + '\convert.exe' , '-compress', 'lzw', '-density', '200', '-resize', '99%', '-gravity', 'center', '-extent', '1700x2200',  filename + '.pdf', filename + '.tif']
+				command = [base_path + '\convert.exe' , '-depth', '8', '-compress', 'lzw', '-density', '200', '-gravity', 'center', '-extent', '1700x2200',  filename + '.pdf', filename + '.tif']
 				process = Popen(command, shell=True, stdout=PIPE)
 				process.wait()
 				if process.returncode == 0:
