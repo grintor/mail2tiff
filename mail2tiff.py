@@ -1,36 +1,109 @@
-#!/usr/bin/env python
-
-## Open Sourced by - Newsman App www.newsmanapp.com
-## (c) 2013 Newsman App
-## https://github.com/Newsman/MailToJson
-
 import sys
 sys.dont_write_bytecode = True
 
-import urllib.request, urllib.error, urllib.parse, email, re, csv, io, base64, json, datetime, pprint
-from optparse import OptionParser
+import os
+from shutil import copy
+import configparser
+from datetime import datetime
+import smtpd
+import asyncore
+import json
+import re, email, csv, base64, json
+from datetime import datetime
+from io import StringIO
+from subprocess import Popen, PIPE, STDOUT, DEVNULL
 
-VERSION = "1.3.1"
+smtpd.__version__ = 'This SMTP daemon developed by GTC. support@georgiatc.com'
 
-ERROR_NOUSER = 67
-ERROR_PERM_DENIED = 77
-ERROR_TEMP_FAIL = 75
+config = configparser.ConfigParser()
+config.read('config.ini')
 
-# regular expresion from https://github.com/django/django/blob/master/django/core/validators.py
-email_re = re.compile(
-	r"(^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*"	# dot-atom
-	# quoted-string, see also http://tools.ietf.org/html/rfc2822#section-3.2.5
-	r'|^"([\001-\010\013\014\016-\037!#-\[\]-\177]|\\[\001-\011\013\014\016-\177])*"'
-	r')@((?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)$)'  # domain
-	r'|\[(25[0-5]|2[0-4]\d|[0-1]?\d?\d)(\.(25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3}\]$', re.IGNORECASE)
-	
-email_extract_re = re.compile("<(([.0-9a-z_+-=]+)@(([0-9a-z-]+\.)+[0-9a-z]{2,9}))>", re.M|re.S|re.I)
-filename_re = re.compile("filename=\"(.+)\"|filename=([^;\n\r\"\']+)", re.I|re.S)
+try:
+	# PyInstaller creates a temp folder and stores path in _MEIPASS
+	base_path = sys._MEIPASS
+except Exception:
+	base_path = os.path.abspath(".")
 
-begin_tab_re = re.compile("^\t{1,}", re.M)
-begin_space_re = re.compile("^\s{1,}", re.M)
+def main():
+	server = CustomSMTPServer((config['SERVER']['listen_ip'], int(config['SERVER']['listen_port'])), None)
+	asyncore.loop()
+
+class CustomSMTPServer(smtpd.SMTPServer):
+	def process_message(self, peer, mailfrom, rcpttos, message_data):
+		print('process_message triggered. Processing...')
+		print ('Receiving message from:', peer)
+		print ('Message addressed from:', mailfrom)
+		print ('Message addressed to	 :', rcpttos)
+		print ('Message length		 :', len(message_data))
+		
+		if rcpttos[0] not in config['ADDRESS_MAP']:
+			print('=== Not To Valid Recpt: Ignoring ====' + '\n')
+		else:
+			destination = config['ADDRESS_MAP'][rcpttos[0]]
+			#p = Popen([base_path + '\mailtojson.exe', '-p'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+			#mailObject = p.communicate(input=bytes(message_data, 'UTF-8'))[0]
+			#mailObject = json.loads(mailObject.decode())
+			mj = MailJson(message_data)
+			mj.parse()
+			mailObject = mj.getData()
+			mailObject['rcpttos'] = rcpttos;
+			mailObject['mailfrom'] = mailfrom;
+			mailObject['peer'] = peer;
+			html_message = None
+
+			for part in mailObject['message']:
+				if part['content_type'] == 'text/html':
+					html_message = part['content'].strip()
+				if part['content_type'] == 'text/plain':
+					text_message = part['content']
+			if html_message == None:
+				html_message = '<html><head></head><body><pre>' + str(text_message) + '</pre></body></html>'
+				html_message = bytes(html_message, mailObject['encoding'])
+			if html_message[:6].lower() != bytes('<html>', 'ascii'):
+				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body>' + str(html_message, mailObject['encoding']) + '</body></html>'
+				html_message = bytes(html_message, mailObject['encoding'])
+			filename = datetime.now().strftime("%Y-%m-%d-%H.%M.%S.") + str(datetime.now().microsecond) + '_'
+			filename += mailObject['from'][0]['name'].replace(' ', '_') + '__'
+			filename += mailObject['from'][0]['email']
+			html_file = open(filename + '.html', 'wb')
+			html_file.write(html_message)
+			html_file.close()
+			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '8', '--image-quality', '99', '--page-size', 'Letter', filename + '.html', filename + '.pdf']
+			process = Popen(command, stdout=DEVNULL, stderr=DEVNULL)
+			process.wait()
+			if process.returncode == 0:
+				os.remove(filename + '.html')
+				command = [base_path + '\convert.exe' , '-compress', 'lzw', '-density', '200', '-resize', '99%', '-gravity', 'center', '-extent', '1700x2200',  filename + '.pdf', filename + '.tif']
+				process = Popen(command, shell=True, stdout=PIPE)
+				process.wait()
+				if process.returncode == 0:
+					os.remove(filename + '.pdf')
+					try:
+						copy(filename + '.tif', destination)
+					except:
+						pass
+					else:
+						os.remove(filename + '.tif')
+						print('=== Image File Delivered ====' + '\n')
+						
+
 
 class MailJson:
+
+	# regular expresion from https://github.com/django/django/blob/master/django/core/validators.py
+	email_re = re.compile(
+		r"(^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*"	# dot-atom
+		# quoted-string, see also http://tools.ietf.org/html/rfc2822#section-3.2.5
+		r'|^"([\001-\010\013\014\016-\037!#-\[\]-\177]|\\[\001-\011\013\014\016-\177])*"'
+		r')@((?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+(?:[A-Z]{2,6}\.?|[A-Z0-9-]{2,}\.?)$)'  # domain
+		r'|\[(25[0-5]|2[0-4]\d|[0-1]?\d?\d)(\.(25[0-5]|2[0-4]\d|[0-1]?\d?\d)){3}\]$', re.IGNORECASE)
+		
+	email_extract_re = re.compile("<(([.0-9a-z_+-=]+)@(([0-9a-z-]+\.)+[0-9a-z]{2,9}))>", re.M|re.S|re.I)
+	filename_re = re.compile("filename=\"(.+)\"|filename=([^;\n\r\"\']+)", re.I|re.S)
+
+	begin_tab_re = re.compile("^\t{1,}", re.M)
+	begin_space_re = re.compile("^\s{1,}", re.M)
+
 	def __init__(self, content = None):
 		self.data = {}
 		self.encoding = "utf-8" # output encoding
@@ -60,8 +133,8 @@ class MailJson:
 			return subject
 
 		subject = subject.replace("\r", "")
-		subject = begin_tab_re.sub("", subject)
-		subject = begin_space_re.sub("", subject)
+		subject = self.begin_tab_re.sub("", subject)
+		subject = self.begin_space_re.sub("", subject)
 		lines = subject.split("\n")
 
 		new_subject = ""
@@ -73,7 +146,7 @@ class MailJson:
 		return new_subject
 
 	def _extract_email(self, s):
-		ret = email_extract_re.findall(s)
+		ret = self.email_extract_re.findall(s)
 		if len(ret) < 1:
 			return None
 		else:
@@ -95,12 +168,12 @@ class MailJson:
 				else:
 					h_encoding = h_encoding.lower()
 
-				hv = str(hv, h_encoding).strip().strip("\t")
+				hv = str(hv.encode(self.encoding), h_encoding).strip().strip("\t")
 
 
 				h_ret.append(hv.encode(self.encoding))
 
-			ret.append(" ".join(h_ret))
+			ret.append(b" ".join(h_ret).decode("utf-8"))
 
 		return ret
 
@@ -114,7 +187,7 @@ class MailJson:
 		if isinstance(v, list):
 			v = ",".join(v)
 		v = v.replace("\n", " ").replace("\r", " ").strip()
-		s = io.StringIO(v)
+		s = StringIO(v)
 		c = csv.reader(s)
 		try:
 			row = next(c)
@@ -123,7 +196,7 @@ class MailJson:
 			
 		for entry in row:
 			entry = entry.strip()
-			if email_re.match(entry):
+			if self.email_re.match(entry):
 				e = entry
 				entry = ""
 			else:
@@ -143,15 +216,15 @@ class MailJson:
 
 	def _parse_date(self, v):
 		if v is None:
-			return datetime.datetime.now()
+			return datetime.now()
 
 		tt = email.utils.parsedate_tz(v)
 
 		if tt is None:
-			return datetime.datetime.now()
+			return datetime.now()
 
 		timestamp = email.utils.mktime_tz(tt)
-		date = datetime.datetime.fromtimestamp(timestamp)
+		date = datetime.fromtimestamp(timestamp)
 		return date
 
 	def _get_content_charset(self, part, failobj = None):
@@ -199,7 +272,6 @@ class MailJson:
 				headers[k] = v[0]
 			else:
 				headers[k] = v
-
 		self.data["headers"] = headers
 		self.data["datetime"] = self._parse_date(headers.get("date", None)).strftime("%Y-%m-%d %H:%M:%S")
 		self.data["subject"] = self._fixEncodedSubject(headers.get("subject", None))
@@ -217,7 +289,7 @@ class MailJson:
 			content_disposition = part.get("Content-Disposition", None)
 			if content_disposition:
 				# we have attachment
-				r = filename_re.findall(content_disposition)
+				r = self.filename_re.findall(content_disposition)
 				if r:
 					filename = sorted(r[0])[1]
 				else:
@@ -227,7 +299,7 @@ class MailJson:
 				attachments.append(a)
 			else:
 				try:
-					p = {"content_type": part.get_content_type(), "content": str(part.get_payload(decode = 1), self._get_content_charset(part, "utf-8"), "ignore").encode(self.encoding) }
+					p = {"content_type": part.get_content_type(), "content": part.get_payload(decode = True) }
 					message.append(p)
 				except LookupError:
 					# Sometimes an encoding isn't recognised - not much to be done
@@ -243,33 +315,4 @@ class MailJson:
 		return self.data
 
 if __name__ == "__main__":
-	usage = "usage: %prog [options]"
-	parser = OptionParser(usage)
-	parser.add_option("-u", "--url", dest = "url", action = "store", help = "the url where to post the mail data as json")
-	parser.add_option("-p", "--print", dest = "do_print", action = "store_true", help = "no json posting, just print the data")
-
-	opt, args = parser.parse_args()
-
-	if not opt.url and not opt.do_print:
-		print(parser.format_help())
-		sys.exit(1)
-
-	content = sys.stdin.read()
-
-	try:
-		mj = MailJson(content)
-		mj.parse()
-		data = mj.getData()
-
-		if opt.do_print:
-			print((json.dumps(data, encoding = data.get("encoding"))))
-		else:
-			headers = { "Content-Type": "application/json; charset=%s" % data.get("encoding"), "User-Agent": "NewsmanApp/MailToJson %s - https://github.com/Newsman/MailToJson" % VERSION }
-			req = urllib.request.Request(opt.url, json.dumps(data, encoding = data.get("encoding")), headers)
-			resp = urllib.request.urlopen(req)
-			ret = resp.read()
-
-			print("Parsed Mail Data sent to: %s\n" % opt.url)
-	except Exception as inst:
-		print("ERR: %s" % inst)
-		sys.exit(ERROR_TEMP_FAIL)
+    main()
