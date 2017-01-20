@@ -3,10 +3,10 @@
 block_cipher = None
 
 
-a = Analysis(['mail2tiff.py'],
+a = Analysis(['mail.py'],
              pathex=['C:\\Users\\GTC\\Desktop\\VIM\\python code'],
              binaries=None,
-             datas=[('wkhtmltopdf.exe' , '.'), ('convert.exe', '.'), ('colors.xml', '.'), ('delegates.xml', '.'), ('magic.xml', '.')],
+             datas=[('wkhtmltopdf.exe' , '.'), ('convert.exe', '.'), ('gswin32c.exe', '.'), ('gsdll64.dll', '.'), ('vcomp100.dll', '.')],
              hiddenimports=[],
              hookspath=[],
              runtime_hooks=[],
@@ -21,7 +21,7 @@ exe = EXE(pyz,
           a.binaries,
           a.zipfiles,
           a.datas,
-          name='mail2tiff',
+          name='mail',
           debug=False,
           strip=False,
           upx=True,
