@@ -58,16 +58,16 @@ class CustomSMTPServer(smtpd.SMTPServer):
 				if part['content_type'] == 'text/plain':
 					text_message = part['content']
 			if html_message == None:
-				html_message = '<html><head></head><body><pre>' + str(text_message, mailObject['encoding']) + '</pre></body></html>'
-				html_message = bytes(html_message, mailObject['encoding'])
-			if html_message[:6].lower() != bytes('<html>', 'ascii'):
-				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body>' + str(html_message, mailObject['encoding']) + '</body></html>'
-				html_message = bytes(html_message, mailObject['encoding'])
+				html_message = '<html><head></head><body><pre>' + text_message + '</pre></body></html>'
+				html_message = html_message
+			if html_message[:6].lower() != '<html>':
+				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body>' + html_message + '</body></html>'
+				html_message = html_message
 			filename = datetime.now().strftime("%Y-%m-%d-%H.%M.%S.") + str(datetime.now().microsecond) + '_'
 			filename += mailObject['from'][0]['name'].replace(' ', '_') + '__'
 			filename += mailObject['from'][0]['email']
 			html_file = open(filename + '.html', 'wb')
-			html_file.write(html_message)
+			html_file.write(bytes(html_message, 'utf-8'))
 			html_file.close()
 			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '9', '--image-quality', '99', '--page-size', 'Letter', filename + '.html', filename + '.pdf']
 			process = Popen(command, stdout=DEVNULL, stderr=DEVNULL)
@@ -174,7 +174,7 @@ class MailJson:
 
 				h_ret.append(hv.encode(self.encoding))
 
-			ret.append(b" ".join(h_ret).decode("utf-8"))
+			ret.append(str(b" ".join(h_ret), self.encoding))
 
 		return ret
 
@@ -228,40 +228,11 @@ class MailJson:
 		date = datetime.fromtimestamp(timestamp)
 		return date
 
-	def _get_content_charset(self, part, failobj = None):
-		"""Return the charset parameter of the Content-Type header.
-
-		The returned string is always coerced to lower case.  If there is no
-		Content-Type header, or if that header has no charset parameter,
-		failobj is returned.
-		"""
-		missing = object()
-		charset = part.get_param("charset", missing)
-		if charset is missing:
-			return failobj
-		if isinstance(charset, tuple):
-			# RFC 2231 encoded, so decode it, and it better end up as ascii.
-			pcharset = charset[0] or "us-ascii"
-			try:
-				# LookupError will be raised if the charset isn't known to
-				# Python.  UnicodeError will be raised if the encoded text
-				# contains a character not in the charset.
-				charset = str(charset[2], pcharset).encode("us-ascii")
-			except (LookupError, UnicodeError):
-				charset = charset[2]
-		# charset character must be in us-ascii range
-		try:
-			if isinstance(charset, str):
-				charset = charset.encode("us-ascii")
-			charset = str(charset, "us-ascii").encode("us-ascii")
-		except UnicodeError:
-			return failobj
-		# RFC 2046, $4.1.2 says charsets are not case sensitive
-		return charset.lower()
-
 	def parse(self):
-		self.msg = email.message_from_string(self.content)
-
+		self.msg = email.message_from_bytes(bytes(self.content, 'utf-8'))
+		content_charset = self.msg.get_content_charset()
+		if content_charset == None:
+			content_charset = 'utf-8'
 		# raw headers
 		headers = {}
 		for k in list(self.msg.keys()):
@@ -273,6 +244,7 @@ class MailJson:
 				headers[k] = v[0]
 			else:
 				headers[k] = v
+
 		self.data["headers"] = headers
 		self.data["datetime"] = self._parse_date(headers.get("date", None)).strftime("%Y-%m-%d %H:%M:%S")
 		self.data["subject"] = self._fixEncodedSubject(headers.get("subject", None))
@@ -300,7 +272,7 @@ class MailJson:
 				attachments.append(a)
 			else:
 				try:
-					p = {"content_type": part.get_content_type(), "content": part.get_payload(decode = True) }
+					p = {"content_type": part.get_content_type(), "content": str(part.get_payload(decode = 1), content_charset, "ignore") }
 					message.append(p)
 				except LookupError:
 					# Sometimes an encoding isn't recognised - not much to be done
