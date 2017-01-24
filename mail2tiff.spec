@@ -3,7 +3,7 @@
 block_cipher = None
 
 
-a = Analysis(['mail.py'],
+a = Analysis(['mail2tiff.py'],
              pathex=['C:\\Users\\GTC\\Desktop\\VIM\\python code'],
              binaries=None,
              datas=[('wkhtmltopdf.exe' , '.'), ('convert.exe', '.'), ('gswin32c.exe', '.'), ('gsdll64.dll', '.'), ('vcomp100.dll', '.')],
@@ -21,7 +21,7 @@ exe = EXE(pyz,
           a.binaries,
           a.zipfiles,
           a.datas,
-          name='mail',
+          name='mail2tiff',
           debug=False,
           strip=False,
           upx=True,
