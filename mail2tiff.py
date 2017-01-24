@@ -41,9 +41,6 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			print('=== Not To Valid Recpt: Ignoring ====' + '\n')
 		else:
 			destination = config['ADDRESS_MAP'][rcpttos[0]]
-			#p = Popen([base_path + '\mailtojson.exe', '-p'], stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-			#mailObject = p.communicate(input=bytes(message_data, 'UTF-8'))[0]
-			#mailObject = json.loads(mailObject.decode())
 			mj = MailJson(message_data)
 			mj.parse()
 			mailObject = mj.get_data()
@@ -53,12 +50,15 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			html_message = None
 
 			for part in mailObject['message']:
+				# might need to extract part['headers']['encoding'] or something to pass correct
+				# encoding to the HTML file we build. right now it's mailObject['encoding']
+				# which is always utf-8.
 				if part['content_type'] == 'text/html':
 					html_message = part['content'].strip()
 				if part['content_type'] == 'text/plain':
 					text_message = part['content']
 			if html_message == None:
-				html_message = '<html><head></head><body><pre>' + text_message + '</pre></body></html>'
+				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body><pre>' + text_message + '</pre></body></html>'
 				html_message = html_message
 			if html_message[:6].lower() != '<html>':
 				html_message = '<html><head><meta charset="' + mailObject['encoding'] + '"></head><body>' + html_message + '</body></html>'
