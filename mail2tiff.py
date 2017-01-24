@@ -52,7 +52,7 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			mailObject['peer'] = peer;
 			html_message = None
 
-			for part in mailObject['parts']:
+			for part in mailObject['message']:
 				if part['content_type'] == 'text/html':
 					html_message = part['content'].strip()
 				if part['content_type'] == 'text/plain':
@@ -295,7 +295,7 @@ class MailJson:
 					pass
 
 		self.data["attachments"] = attachments
-		self.data["parts"] = parts
+		self.data["message"] = parts
 		self.data["encoding"] = self.encoding
 
 		return self.get_data()
