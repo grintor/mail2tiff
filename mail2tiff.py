@@ -12,6 +12,8 @@ import re, email, csv, base64, json
 from datetime import datetime
 from io import StringIO
 from subprocess import Popen, PIPE, STDOUT, DEVNULL
+from threading import Timer
+from glob import glob
 
 smtpd.__version__ = 'This SMTP daemon developed by GTC. support@georgiatc.com'
 
@@ -27,11 +29,22 @@ except Exception:
 
 def main():
 	server = CustomSMTPServer((config['SERVER']['listen_ip'], int(config['SERVER']['listen_port'])), None)
+	print ("SMTP daemon started.")
+	print ("listening on", config['SERVER']['listen_ip'] + ":" + config['SERVER']['listen_port'])
+	flushOutput()
 	asyncore.loop()
+	
+def flushOutput():	# this thread loops every second and flushes the stderr and stdout
+	sys.stdout.flush()
+	sys.stderr.flush()
+	flushOutput_thread = Timer(1, flushOutput)
+	flushOutput_thread.daemon = True
+	flushOutput_thread.start()
 
 class CustomSMTPServer(smtpd.SMTPServer):
 	def process_message(self, peer, mailfrom, rcpttos, message_data):
-		print('process_message triggered. Processing...')
+		print ()
+		print ('process_message triggered. Processing...')
 		print ('Receiving message from:', peer)
 		print ('Message addressed from:', mailfrom)
 		print ('Message addressed to	 :', rcpttos)
@@ -69,24 +82,35 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			html_file = open(filename + '.html', 'wb')
 			html_file.write(bytes(html_message, 'utf-8'))
 			html_file.close()
-			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '9', '--image-quality', '99', '--page-size', 'Letter', filename + '.html', filename + '.pdf']
-			process = Popen(command, stdout=DEVNULL, stderr=DEVNULL)
+			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '9', '--image-quality', '99', '--page-size', 'Letter', '--print-media-type', filename + '.html', filename + '.pdf']
+			process = Popen(command, stdout=PIPE, stderr=PIPE)
 			process.wait()
 			if process.returncode == 0:
 				os.remove(filename + '.html')
-				command = [base_path + '\convert.exe' , '-depth', '8', '-compress', 'lzw', '-density', '200', '-gravity', 'center', '-extent', '1700x2200',	 filename + '.pdf', filename + '.tif']
-				process = Popen(command, shell=True, stdout=PIPE)
+				command = [base_path + '\convert.exe' , '-depth', '8', '-quality', '99', '-density', '200', '-gravity', 'center', '-extent', '1700x2200',	 filename + '.pdf', filename + '.jpg']
+				process = Popen(command, stdout=PIPE, stderr=PIPE)
 				process.wait()
 				if process.returncode == 0:
 					os.remove(filename + '.pdf')
-					try:
-						copy(filename + '.tif', destination)
-					except:
-						pass
+					command = [base_path + '\convert.exe', '-compress', 'lzw', filename + '*.jpg', filename + '.tif']
+					process = Popen(command, stdout=PIPE, stderr=PIPE)
+					process.wait()
+					if process.returncode == 0:
+						for f in glob(filename + '*.jpg'):
+							os.remove(f)
+						try:
+							copy(filename + '.tif', destination)
+						except:
+							print ("could not copy " , filename, "to", destination)
+						else:
+							os.remove(filename + '.tif')
+							print('=== Image File Delivered ====' + '\n')
 					else:
-						os.remove(filename + '.tif')
-						print('=== Image File Delivered ====' + '\n')
-						
+						print (base_path + "\convert.exe (jpg to tif) exited with" , process.returncode)
+				else:
+					print (base_path + "\convert.exe (pdf to jpg) exited with" , process.returncode)
+			else:
+				print (base_path + "\wkhtmltopdf.exe exited with" , process.returncode)
 
 
 class MailJson:
