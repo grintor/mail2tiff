@@ -54,6 +54,8 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			print('=== Not To Valid Recpt: Ignoring ====' + '\n')
 		else:
 			destination = config['ADDRESS_MAP'][rcpttos[0]]
+			colorType = config['COLOR'][rcpttos[0]]
+			margin = config['MARGINS'][rcpttos[0]]
 			mj = MailJson(message_data)
 			mj.parse()
 			mailObject = mj.get_data()
@@ -82,7 +84,7 @@ class CustomSMTPServer(smtpd.SMTPServer):
 			html_file = open(filename + '.html', 'wb')
 			html_file.write(bytes(html_message, 'utf-8'))
 			html_file.close()
-			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', '9', '--margin-left', '9', '--margin-right', '9', '--margin-top', '9', '--image-quality', '99', '--page-size', 'Letter', '--print-media-type', filename + '.html', filename + '.pdf']
+			command = [base_path + '\wkhtmltopdf.exe', '--margin-bottom', margin, '--margin-left', margin, '--margin-right', margin, '--margin-top', margin, '--image-quality', '99', '--dpi', '200', '--page-size', 'Letter', '--print-media-type', filename + '.html', filename + '.pdf']
 			process = Popen(command, stdout=PIPE, stderr=PIPE)
 			process.wait()
 			if process.returncode == 0:
@@ -92,7 +94,7 @@ class CustomSMTPServer(smtpd.SMTPServer):
 				process.wait()
 				if process.returncode == 0:
 					os.remove(filename + '.pdf')
-					command = [base_path + '\convert.exe', '-compress', 'lzw', filename + '*.jpg', filename + '.tif']
+					command = [base_path + '\convert.exe', '-compress', 'lzw', '-type', colorType, filename + '*.jpg', filename + '.tif']
 					process = Popen(command, stdout=PIPE, stderr=PIPE)
 					process.wait()
 					if process.returncode == 0:
@@ -115,7 +117,7 @@ class CustomSMTPServer(smtpd.SMTPServer):
 
 class MailJson:
 
-	# regular expresion from https://github.com/django/django/blob/master/django/core/validators.py
+	# regular expresion from https://github.com/django/django/blob/1.5.12/django/core/validators.py
 	email_re = re.compile(
 		r"(^[-!#$%&'*+/=?^_`{}|~0-9A-Z]+(\.[-!#$%&'*+/=?^_`{}|~0-9A-Z]+)*"	# dot-atom
 		# quoted-string, see also http://tools.ietf.org/html/rfc2822#section-3.2.5
